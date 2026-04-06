@@ -43,6 +43,8 @@ onAuthStateChanged(auth, function(user) {
     window._currentUser = user;
     if (!window._appInited) { window._appInited = true; init(); }
     if (typeof checkAdminUI === 'function') checkAdminUI();
+    // Fetch user display name from app_users
+    fetchUserName(user.uid);
     // Start real-time listener
     startRealtimeListener();
   } else {
@@ -60,6 +62,18 @@ const ADMIN_EMAIL = 'Jia4289@gmail.com';
 window.isAdmin = function() {
   return window._currentUser && window._currentUser.email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
 };
+
+async function fetchUserName(uid) {
+  var fb = window._fb;
+  try {
+    var snap = await fb.getDocs(fb.collection(fb.db, 'app_users'));
+    snap.forEach(function(d) {
+      if (d.id === uid) {
+        window._currentUserName = d.data().name || '';
+      }
+    });
+  } catch(e) {}
+}
 
 function startRealtimeListener() {
   var fb = window._fb;
@@ -83,17 +97,15 @@ function startRealtimeListener() {
 
   // Equipment listener
   unsubs.push(fb.onSnapshot(fb.collection(fb.db, 'equipment'), function(snapshot) {
-    if (!snapshot.empty) {
-      window.EQUIPMENT = [];
-      snapshot.forEach(function(d) {
-        var data = d.data();
-        data._docId = d.id;
-        // Use custom id field if set, else use doc id
-        if (!data.id) data.id = d.id;
-        window.EQUIPMENT.push(data);
-      });
-      window.EQUIPMENT.sort(function(a,b){ return (a.sortOrder||0)-(b.sortOrder||0); });
-    }
+    window.EQUIPMENT = [];
+    snapshot.forEach(function(d) {
+      var data = d.data();
+      data._docId = d.id;
+      if (!data.id) data.id = d.id;
+      window.EQUIPMENT.push(data);
+    });
+    window.EQUIPMENT.sort(function(a,b){ return (a.sortOrder||0)-(b.sortOrder||0); });
+    if (snapshot.empty && window._currentUser) seedFirebaseDefaults();
     renderEquipList();
     if (typeof populateEquipSelects === 'function') populateEquipSelects();
     if (typeof checkAdminUI === 'function') checkAdminUI();
@@ -102,12 +114,14 @@ function startRealtimeListener() {
 
   // Q&A listener
   unsubs.push(fb.onSnapshot(fb.collection(fb.db, 'qa'), function(snapshot) {
-    if (!snapshot.empty) {
-      window.QA_DATA = [];
-      snapshot.forEach(function(d) {
-        var data = d.data(); data._docId = d.id; data.id = d.id; window.QA_DATA.push(data);
-      });
-      window.QA_DATA.sort(function(a,b){ return (a.sortOrder||0)-(b.sortOrder||0); });
+    window.QA_DATA = [];
+    snapshot.forEach(function(d) {
+      var data = d.data(); data._docId = d.id; data.id = d.id; window.QA_DATA.push(data);
+    });
+    window.QA_DATA.sort(function(a,b){ return (a.sortOrder||0)-(b.sortOrder||0); });
+    // If Firebase has no QA yet, seed default data into Firestore
+    if (snapshot.empty && window._currentUser) {
+      seedFirebaseDefaults();
     }
     if (document.getElementById('qa-list')) renderQA();
     if (document.getElementById('admin-qa-list') && typeof renderAdminQA==='function') renderAdminQA();
@@ -115,13 +129,11 @@ function startRealtimeListener() {
 
   // Contacts listener
   unsubs.push(fb.onSnapshot(fb.collection(fb.db, 'contacts'), function(snapshot) {
-    if (!snapshot.empty) {
-      window.CONTACTS = [];
-      snapshot.forEach(function(d) {
-        var data = d.data(); data._docId = d.id; data.id = d.id; window.CONTACTS.push(data);
-      });
-      window.CONTACTS.sort(function(a,b){ return (a.sortOrder||0)-(b.sortOrder||0); });
-    }
+    window.CONTACTS = [];
+    snapshot.forEach(function(d) {
+      var data = d.data(); data._docId = d.id; data.id = d.id; window.CONTACTS.push(data);
+    });
+    window.CONTACTS.sort(function(a,b){ return (a.sortOrder||0)-(b.sortOrder||0); });
     renderContacts();
     if (document.getElementById('admin-contacts-list') && typeof renderAdminContacts==='function') renderAdminContacts();
   }, function(err) { console.warn('Contacts listener:', err); }));
@@ -142,7 +154,14 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 .app{display:flex;min-height:100vh;position:relative;z-index:1;}
 
 /* SIDEBAR */
-.sidebar{width:260px;background:var(--sur);border-right:1px solid var(--bdr);display:flex;flex-direction:column;position:fixed;top:0;left:0;bottom:0;z-index:100;}
+.sidebar{width:260px;background:var(--sur);border-right:1px solid var(--bdr);display:flex;flex-direction:column;position:fixed;top:0;left:0;bottom:0;z-index:100;transition:transform .3s ease;}
+.sidebar.collapsed{transform:translateX(-260px);}
+.hamburger-btn{position:fixed;top:16px;left:16px;z-index:101;background:var(--sur);border:1px solid var(--bdr);border-radius:var(--rs);width:40px;height:40px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;transition:left .3s ease,background .2s;}
+.hamburger-btn:hover{background:var(--sur2);}
+.sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:99;}
+.sidebar-overlay.show{display:block;}
+.main{margin-left:260px;flex:1;padding:32px;transition:margin-left .3s ease;}
+.main.expanded{margin-left:0;}
 .logo{padding:28px 24px 20px;border-bottom:1px solid var(--bdr);}
 .logo-icon{width:42px;height:42px;background:linear-gradient(135deg,var(--acc),var(--acc2));border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;margin-bottom:12px;box-shadow:0 0 20px rgba(79,195,161,.3);}
 .logo h1{font-family:'Noto Serif TC',serif;font-size:15px;font-weight:700;line-height:1.4;letter-spacing:.5px;}
@@ -160,7 +179,6 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 
 /* MAIN */
-.main{margin-left:260px;flex:1;padding:32px;}
 .page-section{display:none;}
 .page-section.active{display:block;}
 .page-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:28px;flex-wrap:wrap;gap:12px;}
@@ -201,8 +219,8 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 /* RECENT LIST */
 .recent-item{display:flex;align-items:center;gap:14px;padding:12px 16px;background:var(--sur2);border-radius:var(--rs);border:1px solid var(--bdr);transition:all .2s;cursor:pointer;margin-bottom:10px;}
 .recent-item:hover{border-color:var(--acc);background:rgba(79,195,161,.04);}
-.recent-eq{font-size:13px;font-weight:600;}
-.recent-desc{font-size:12px;color:var(--txt2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px;}
+.recent-eq{font-size:13px;font-weight:600;word-break:break-all;}
+.recent-desc{font-size:12px;color:var(--txt2);margin-top:2px;overflow:hidden;text-overflow:ellipsis;max-width:100%;}
 .recent-meta{font-size:11px;color:var(--txt2);font-family:'JetBrains Mono',monospace;text-align:right;flex-shrink:0;}
 
 /* FORMS */
@@ -359,7 +377,8 @@ tbody td{padding:12px 16px;color:var(--txt);vertical-align:middle;}
 ::-webkit-scrollbar{width:6px;}
 ::-webkit-scrollbar-track{background:var(--bg);}
 ::-webkit-scrollbar-thumb{background:var(--bdr);border-radius:3px;}
-@media(max-width:900px){.sidebar{transform:translateX(-100%)}.main{margin-left:0;padding:20px 16px}.stats-grid{grid-template-columns:1fr 1fr}.form-grid{grid-template-columns:1fr}}
+@media(max-width:900px){.main{margin-left:0;padding:20px 16px}.stats-grid{grid-template-columns:1fr 1fr}.form-grid{grid-template-columns:1fr}.hamburger-btn{display:flex;}}
+@media(min-width:901px){.hamburger-btn{left:268px;}.sidebar.collapsed + .sidebar-overlay + .main,.main.expanded{margin-left:0;}.sidebar:not(.collapsed) ~ .main{margin-left:260px;}}
 </style>
 </head>
 <body>
@@ -396,7 +415,9 @@ tbody td{padding:12px 16px;color:var(--txt);vertical-align:middle;}
 <div class="app" style="display:none;">
 
 <!-- SIDEBAR -->
-<aside class="sidebar">
+<button class="hamburger-btn" id="hamburger-btn" onclick="toggleSidebar()" title="選單">☰</button>
+<div class="sidebar-overlay" id="sidebar-overlay" onclick="toggleSidebar()"></div>
+<aside class="sidebar" id="sidebar">
   <div class="logo">
     <div class="logo-icon">🔬</div>
     <h1>關於儀器的<br>兩三事</h1>
@@ -420,6 +441,7 @@ tbody td{padding:12px 16px;color:var(--txt);vertical-align:middle;}
     <div class="nav-section" id="admin-nav-section" style="display:none;">
       <div class="nav-label">管理員</div>
       <div class="nav-item" id="nav-admin" onclick="showPage('admin')"><span class="icon">⚙️</span>管理後台</div>
+      <div class="nav-item" onclick="openUserManageModal()"><span class="icon">👤</span>使用者管理</div>
     </div>
   </nav>
   <div class="sidebar-footer">
@@ -548,7 +570,7 @@ tbody td{padding:12px 16px;color:var(--txt);vertical-align:middle;}
     <div class="card-title">填寫狀況資訊</div>
     <div class="form-grid">
       <div class="form-group"><label>儀器 *</label><select id="f-equip" onchange="onEquipChange()"><option value="">— 選擇儀器 —</option></select></div>
-      <div class="form-group"><label>登錄者 *</label><input type="text" id="f-user" placeholder="輸入姓名或工號"></div>
+      <div class="form-group"><label>登錄者 *</label><input type="text" id="f-user" placeholder="輸入姓名或工號" title="自動帶入登入者姓名，可手動修改"></div>
       <div class="form-group"><label>發生時間 *</label><input type="date" id="f-date"></div>
       <div class="form-group"><label>嚴重程度</label>
         <div style="display:flex;gap:10px;">
@@ -775,6 +797,33 @@ tbody td{padding:12px 16px;color:var(--txt);vertical-align:middle;}
 
 <!-- MODALS -->
 
+
+<!-- USER MANAGE MODAL -->
+<div class="modal-overlay" id="user-manage-modal">
+  <div class="modal" style="max-width:520px;">
+    <div class="modal-header">
+      <div class="modal-title">👤 使用者管理</div>
+      <span class="modal-close" onclick="closeModal('user-manage-modal')">✕</span>
+    </div>
+    <div style="margin-bottom:20px;">
+      <div class="card-title" style="margin-bottom:12px;">＋ 新增使用者帳號</div>
+      <div class="form-grid" style="gap:10px;">
+        <div class="form-group"><label>Email *</label><input type="email" id="new-user-email" placeholder="staff@hospital.com"></div>
+        <div class="form-group"><label>姓名</label><input type="text" id="new-user-name" placeholder="如：王小明"></div>
+        <div class="form-group full"><label>初始密碼 *（至少6碼）</label><input type="password" id="new-user-pw" placeholder="設定初始密碼"></div>
+      </div>
+      <div style="margin-top:12px;display:flex;gap:10px;">
+        <button class="btn btn-primary" onclick="createAppUser()">✓ 建立帳號</button>
+      </div>
+      <div style="margin-top:10px;font-size:12px;color:var(--txt2);">💡 建立後請告知使用者帳號密碼，他們可在登入後自行修改密碼</div>
+    </div>
+    <div style="border-top:1px solid var(--bdr);padding-top:16px;">
+      <div class="card-title" style="margin-bottom:12px;">目前使用者清單</div>
+      <div id="user-list-content"><div style="color:var(--txt2);font-size:13px;">載入中…</div></div>
+    </div>
+  </div>
+</div>
+
 <!-- EQUIP MODAL -->
 <div class="modal-overlay" id="equip-modal">
   <div class="modal" style="max-width:560px;">
@@ -947,7 +996,7 @@ tbody td{padding:12px 16px;color:var(--txt);vertical-align:middle;}
 
 <script>
 // ─── DATA ───────────────────────────────────
-var EQUIPMENT = [
+var EQUIPMENT = window.EQUIPMENT_DEFAULT = [
   {id:'CT-001',  name:'64切電腦斷層掃描',  dept:'影像科',     brand:'Siemens SOMATOM',   status:'ok'},
   {id:'MRI-001', name:'3T 核磁共振儀',     dept:'影像科',     brand:'GE SIGNA Premier',  status:'ok'},
   {id:'MRI-002', name:'1.5T 核磁共振儀',   dept:'放射科',     brand:'Philips Ingenia',   status:'warn'},
@@ -977,7 +1026,7 @@ var SPECS = {
   'BR-001': {dept:'放射腫瘤科',brand:'Elekta Flexitron',install:'2020-02',lastPM:'2024-09',nextPM:'2025-03',serial:'ELK-BR-2020-0002',location:'B3 近接治療室',notes:'高放射源操作，嚴格依輻安 SOP 執行，雙人核對。'},
 };
 
-var CONTACTS = [
+var CONTACTS = window.CONTACTS_DEFAULT = [
   {name:'林志明',  role:'醫療器材工程師',         equip:'CT-001, MRI-001, MRI-002', phone:'02-2345-6789 #801', email:'lin.zhiming@hospital.com',  avatar:'👨‍🔧'},
   {name:'張雅婷',  role:'原廠 FSE（Siemens）',     equip:'CT-001, DS-001',           phone:'0912-345-678',      email:'yating.zhang@siemens.com',  avatar:'👩‍🔧'},
   {name:'陳建宏',  role:'放射師長',               equip:'全部儀器',                   phone:'分機 #501',         email:'',                          avatar:'👨‍⚕️'},
@@ -986,7 +1035,7 @@ var CONTACTS = [
   {name:'黃偉倫',  role:'Varian 直線加速器技師',   equip:'RT-001',                   phone:'0933-111-222',      email:'weilun.huang@varian.com',   avatar:'👨‍🔬'},
 ];
 
-var QA_DATA = [
+var QA_DATA = window.QA_DATA_DEFAULT = [
   {cat:'操作',q:'CT 掃描前患者需要空腹嗎？',a:'一般 CT 不需空腹。但若需注射顯影劑，建議空腹 4 小時以降低噁心風險。腹部 CT 依科別要求可能不同，請依開單醫師指示執行。'},
   {cat:'故障',q:'MRI 機器顯示「Quench」警報怎麼辦？',a:'立即疏散掃描室人員，啟動緊急停機程序，通知主管並聯絡原廠工程師。Quench 表示超導磁鐵冷媒（液氦）快速蒸發，是嚴重緊急狀況，勿嘗試自行處理。'},
   {cat:'安全',q:'進入 MRI 室前需確認哪些事項？',a:'必須確認：（1）患者無植入式金屬/電子裝置（2）移除所有金屬物品（3）填寫 MRI 安全篩選表（4）確認孕婦狀態（5）工作人員無禁忌症。'},
@@ -1092,6 +1141,25 @@ function showPage(id) {
   if (nav) nav.classList.add('active');
   if (id === 'query') searchRecords();
   if (id === 'dashboard') renderDashboard();
+  if (id === 'record') autoFillUser();
+}
+
+function autoFillUser() {
+  var userEl = document.getElementById('f-user');
+  if (!userEl || userEl.value.trim()) return; // already filled
+  var user = window._currentUser;
+  if (!user) return;
+  // Priority: displayName > stored name in app_users > email prefix
+  var name = user.displayName || '';
+  if (!name) {
+    // Try from app_users cache
+    name = window._currentUserName || '';
+  }
+  if (!name) {
+    // Fall back to email prefix (before @)
+    name = user.email ? user.email.split('@')[0] : '';
+  }
+  userEl.value = name;
 }
 
 // ─── SEED DATA ──────────────────────────────
@@ -1171,6 +1239,7 @@ function init() {
     s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js';
     document.head.appendChild(s);
   }
+  initSidebar();
 }
 
 // ─── AUTH FUNCTIONS ───────────────────────────
@@ -1464,7 +1533,7 @@ function submitRecord() {
 }
 function clearForm() {
   document.getElementById('f-equip').value = '';
-  document.getElementById('f-user').value = '';
+  document.getElementById('f-user').value = ''; autoFillUser();
   document.getElementById('f-date').value = today();
   document.getElementById('f-desc').value = '';
   document.getElementById('f-action').value = '';
@@ -1755,6 +1824,114 @@ function deleteFuEntry(recordId, entryIdx) {
   });
 }
 
+
+
+// ─── SEED FIREBASE DEFAULTS ──────────────────
+var _seeded = false;
+async function seedFirebaseDefaults() {
+  if (_seeded) return;
+  _seeded = true;
+  var fb = window._fb;
+  // Only admin seeds
+  if (!window.isAdmin()) return;
+
+  try {
+    // Seed QA
+    var qaSnap = await fb.getDocs(fb.collection(fb.db, 'qa'));
+    if (qaSnap.empty) {
+      var defaultQA = window.QA_DATA_DEFAULT || [];
+      for (var i=0; i<defaultQA.length; i++) {
+        await fb.addDoc(fb.collection(fb.db,'qa'), Object.assign({sortOrder:i}, defaultQA[i]));
+      }
+      showToast('✓ 預設 Q&A 已匯入 Firebase', 'success');
+    }
+    // Seed Equipment
+    var eqSnap = await fb.getDocs(fb.collection(fb.db, 'equipment'));
+    if (eqSnap.empty) {
+      var defaultEq = window.EQUIPMENT_DEFAULT || [];
+      for (var i=0; i<defaultEq.length; i++) {
+        await fb.addDoc(fb.collection(fb.db,'equipment'), Object.assign({sortOrder:i}, defaultEq[i]));
+      }
+      showToast('✓ 預設儀器資料已匯入 Firebase', 'success');
+    }
+    // Seed Contacts
+    var cSnap = await fb.getDocs(fb.collection(fb.db, 'contacts'));
+    if (cSnap.empty) {
+      var defaultC = window.CONTACTS_DEFAULT || [];
+      for (var i=0; i<defaultC.length; i++) {
+        await fb.addDoc(fb.collection(fb.db,'contacts'), Object.assign({sortOrder:i}, defaultC[i]));
+      }
+    }
+  } catch(e) {
+    console.warn('Seed error:', e);
+  }
+}
+
+// ─── USER MANAGEMENT ─────────────────────────
+async function openUserManageModal() {
+  if (!window.isAdmin()) { showToast('僅管理員可操作','error'); return; }
+  // Show user manage modal
+  document.getElementById('user-manage-modal').classList.add('open');
+  loadUserList();
+}
+
+async function loadUserList() {
+  // Firebase Auth user list requires Admin SDK (server-side)
+  // From client side we can only create/delete via known UIDs stored in Firestore
+  var fb = window._fb;
+  try {
+    var snap = await fb.getDocs(fb.collection(fb.db, 'app_users'));
+    var html = '';
+    snap.forEach(function(d) {
+      var u = d.data();
+      html += '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--bdr);">';
+      html += '<div style="flex:1;"><div style="font-weight:600;">'+esc(u.email)+'</div>';
+      html += '<div style="font-size:12px;color:var(--txt2);">'+esc(u.name||'')+'</div></div>';
+      html += '<button class="btn btn-danger btn-sm" data-uid="'+d.id+'" data-email="'+esc(u.email)+'" onclick="deactivateUser(this.dataset.uid,this.dataset.email)">停用</button>';
+      html += '</div>';
+    });
+    document.getElementById('user-list-content').innerHTML = html || '<div style="color:var(--txt2);font-size:13px;padding:16px 0;">尚無使用者記錄</div>';
+  } catch(e) {
+    document.getElementById('user-list-content').innerHTML = '<div style="color:var(--err);font-size:13px;">無法載入使用者清單</div>';
+  }
+}
+
+async function createAppUser() {
+  var fb = window._fb;
+  var email = document.getElementById('new-user-email').value.trim();
+  var name  = document.getElementById('new-user-name').value.trim();
+  var pw    = document.getElementById('new-user-pw').value;
+  if (!email||!pw) { showToast('請填寫 Email 和密碼','error'); return; }
+  try {
+    // Create Firebase Auth user
+    var cred = await fb.createUserWithEmailAndPassword(fb.auth, email, pw);
+    // Store in Firestore for management
+    await fb.setDoc(fb.doc(fb.db,'app_users',cred.user.uid), {
+      email: email, name: name||email, createdAt: new Date().toISOString()
+    });
+    document.getElementById('new-user-email').value = '';
+    document.getElementById('new-user-name').value = '';
+    document.getElementById('new-user-pw').value = '';
+    showToast('✓ 使用者 '+email+' 已建立','success');
+    loadUserList();
+  } catch(e) {
+    var msg = e.code==='auth/email-already-in-use' ? '此 Email 已有帳號' :
+              e.code==='auth/weak-password' ? '密碼至少需 6 個字元' : e.message;
+    showToast('建立失敗：'+msg,'error');
+  }
+}
+
+async function deactivateUser(uid, email) {
+  if (!confirm('確定刪除使用者「'+email+'」？Firebase Auth 帳號請至 Console 手動刪除')) return;
+  var fb = window._fb;
+  try {
+    await fb.deleteDoc(fb.doc(fb.db,'app_users',uid));
+    showToast('已刪除使用者記錄','success');
+    loadUserList();
+  } catch(e) {
+    showToast('刪除失敗：'+e.message,'error');
+  }
+}
 
 // ─── ADMIN ───────────────────────────────────
 var ADMIN_EMAIL = 'Jia4289@gmail.com';
