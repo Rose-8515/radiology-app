@@ -1707,6 +1707,63 @@ function updateBadge() {
   document.getElementById('badge-count').textContent = records.length;
 }
 
+
+// ─── RENDER EQUIP MANUALS ────────────────────
+function renderEquipManuals(eq) {
+  var docs = eq.manualDocs || [];
+  var html = '';
+
+  if (!docs.length) {
+    MANUAL_CATS.slice(0,6).forEach(function(cat) {
+      html += '<div class="manual-doc" style="opacity:.5;">';
+      html += '<div style="font-size:28px;">' + cat.icon + '</div>';
+      html += '<div style="font-weight:700;">' + cat.label + '</div>';
+      html += '<div style="font-size:12px;color:var(--txt2);">' + cat.desc + '</div>';
+      if (window.isAdmin && window.isAdmin()) {
+        html += '<button class="btn btn-ghost btn-sm" data-eid="' + eq.id + '" onclick="openManualModal(this.dataset.eid)" style="opacity:1;">+ 新增連結</button>';
+      } else {
+        html += '<div style="font-size:12px;color:var(--txt2);font-style:italic;">尚未設定</div>';
+      }
+      html += '</div>';
+    });
+  } else {
+    docs.forEach(function(d) {
+      var cat = getCatInfo(d.cat || 'other');
+      html += '<div class="manual-doc">';
+      html += '<div style="font-size:28px;">' + (d.icon || cat.icon) + '</div>';
+      html += '<div style="font-weight:700;">' + esc(d.name || cat.label) + '</div>';
+      html += '<div style="font-size:12px;color:var(--txt2);">' + esc(d.desc || cat.desc) + '</div>';
+      var openUrl = convertDriveUrl(d.url);
+      html += '<a href="' + esc(openUrl) + '" target="_blank" rel="noopener" class="btn btn-ghost btn-sm" style="text-decoration:none;justify-content:center;">開啟 →</a>';
+      html += '</div>';
+    });
+    if (window.isAdmin && window.isAdmin()) {
+      var existingCats = docs.map(function(d){ return d.cat; });
+      MANUAL_CATS.forEach(function(cat) {
+        if (existingCats.indexOf(cat.key) < 0) {
+          html += '<div class="manual-doc" style="opacity:.45;border-style:dashed;">';
+          html += '<div style="font-size:28px;">' + cat.icon + '</div>';
+          html += '<div style="font-weight:700;">' + cat.label + '</div>';
+          html += '<div style="font-size:12px;color:var(--txt2);">尚未設定</div>';
+          html += '<button class="btn btn-ghost btn-sm" data-eid="' + eq.id + '" onclick="openManualModal(this.dataset.eid)" style="opacity:1;">+ 新增</button>';
+          html += '</div>';
+        }
+      });
+    }
+  }
+
+  document.getElementById('ed-manuals-list').innerHTML = html;
+}
+
+function convertDriveUrl(url) {
+  if (!url) return '#';
+  var m = url.match(/drive\.google\.com\/file\/d\/([^\/\?]+)/);
+  if (m) return 'https://drive.google.com/file/d/' + m[1] + '/view';
+  var m2 = url.match(/[?&]id=([^&]+)/);
+  if (m2) return 'https://drive.google.com/file/d/' + m2[1] + '/view';
+  return url;
+}
+
 // ─── EQUIP DETAIL ────────────────────────────
 function openEquipDetail(equipId) {
   currentEquipId = equipId;
@@ -1757,24 +1814,7 @@ function openEquipDetail(equipId) {
 
   renderEdRecords();
 
-  var manDocs = [
-    {icon:'📖',name:'操作使用手冊',desc:'完整操作步驟與注意事項'},
-    {icon:'⚡',name:'快速操作指南',desc:'常用功能快速參考卡'},
-    {icon:'🔧',name:'保養維護手冊',desc:'日常保養清潔與校正'},
-    {icon:'⚠️',name:'故障排除手冊',desc:'常見錯誤代碼與處置'},
-    {icon:'📋',name:'品管記錄表單',desc:'QC 日誌與校正記錄'},
-    {icon:'🛡️',name:'輻射安全規範',desc:'操作人員防護 SOP'},
-  ];
-  var manHtml = '';
-  manDocs.forEach(function(m) {
-    manHtml += '<div class="manual-doc">';
-    manHtml += '<div style="font-size:28px;">' + m.icon + '</div>';
-    manHtml += '<div style="font-weight:700;">' + m.name + '</div>';
-    manHtml += '<div style="font-size:12px;color:var(--txt2);">' + m.desc + '</div>';
-    manHtml += '<button class="btn btn-ghost btn-sm" onclick="showToast(\'開啟 ' + eq.id + ' ' + m.name + '\',\'success\')">開啟 →</button>';
-    manHtml += '</div>';
-  });
-  document.getElementById('ed-manuals-list').innerHTML = manHtml;
+  renderEquipManuals(eq);
   document.getElementById('ed-notes').textContent = spec.notes || '暫無備註';
 
   var myContacts = CONTACTS.filter(function(c){ return c.equip.indexOf(equipId)>=0 || c.equip.indexOf('全部')>=0; });
@@ -2628,22 +2668,49 @@ function openManualModal(equipId) {
   document.getElementById('manual-modal').classList.add('open');
 }
 
+// Manual category definitions
+var MANUAL_CATS = [
+  {key:'operation',  icon:'📖', label:'操作使用手冊',  desc:'完整操作步驟與注意事項'},
+  {key:'quick',      icon:'⚡', label:'快速操作指南',  desc:'常用功能快速參考卡'},
+  {key:'maintenance',icon:'🔧', label:'保養維護手冊',  desc:'日常保養清潔與校正'},
+  {key:'trouble',    icon:'⚠️', label:'故障排除手冊',  desc:'常見錯誤代碼與處置'},
+  {key:'qc',         icon:'📋', label:'品管記錄表單',  desc:'QC 日誌與校正記錄'},
+  {key:'safety',     icon:'🛡️', label:'輻射安全規範',  desc:'操作人員防護 SOP'},
+  {key:'other',      icon:'📄', label:'其他文件',      desc:'其他相關文件'},
+];
+
+function getCatInfo(catKey) {
+  return MANUAL_CATS.find(function(c){ return c.key===catKey; }) || MANUAL_CATS[MANUAL_CATS.length-1];
+}
+
 function addManualDoc(data) {
   var i = manualDocCount++;
-  var d = data || {name:'', url:'', desc:''};
+  var d = data || {cat:'operation', name:'', url:'', desc:''};
+  var catOpts = MANUAL_CATS.map(function(c) {
+    return '<option value="'+c.key+'"'+(d.cat===c.key?' selected':'')+'>'+c.icon+' '+c.label+'</option>';
+  }).join('');
   var div = document.createElement('div');
   div.style.cssText = 'background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--rs);padding:14px;margin-bottom:10px;';
-  div.innerHTML = '<div style="display:flex;gap:10px;align-items:center;margin-bottom:8px;">'
+  div.innerHTML = '<div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;">'
     + '<div style="flex:1;font-size:12px;font-weight:600;color:var(--acc);">文件 '+(i+1)+'</div>'
     + '<button class="btn btn-danger btn-sm" onclick="this.closest(&quot;[data-doc]&quot;).remove()" style="font-size:10px;">移除</button>'
     + '</div>'
     + '<div class="form-grid" style="gap:8px;">'
-    + '<div class="form-group"><label>文件名稱</label><input type="text" class="doc-name" value="'+esc(d.name)+'" placeholder="如：操作使用手冊"></div>'
-    + '<div class="form-group"><label>連結（PDF/Drive）</label><input type="text" class="doc-url" value="'+esc(d.url)+'" placeholder="https://..."></div>'
-    + '<div class="form-group full"><label>說明</label><input type="text" class="doc-desc" value="'+esc(d.desc||'')+'" placeholder="簡短說明…"></div>'
+    + '<div class="form-group full"><label>文件類別</label>'
+    + '<select class="doc-cat" onchange="onDocCatChange(this)">'+catOpts+'</select></div>'
+    + '<div class="form-group full"><label>Google Drive 分享連結 *</label>'
+    + '<input type="text" class="doc-url" value="'+esc(d.url||'')+'" placeholder="https://drive.google.com/file/d/..."></div>'
+    + '<div class="form-group full"><label>補充說明（選填）</label>'
+    + '<input type="text" class="doc-desc" value="'+esc(d.desc||'')+'" placeholder="如：2024年更新版"></div>'
     + '</div>';
   div.setAttribute('data-doc', i);
   document.getElementById('manual-docs-editor').appendChild(div);
+}
+
+function onDocCatChange(sel) {
+  // Auto-update placeholder name based on category
+  var cat = getCatInfo(sel.value);
+  // no name field needed - label is taken from category
 }
 
 async function saveManual() {
@@ -2652,10 +2719,12 @@ async function saveManual() {
   if (!eq) return;
   var docs = [];
   document.querySelectorAll('#manual-docs-editor [data-doc]').forEach(function(d) {
-    var name = d.querySelector('.doc-name').value.trim();
+    var catSel = d.querySelector('.doc-cat');
+    var cat  = catSel ? catSel.value : 'other';
     var url  = d.querySelector('.doc-url').value.trim();
     var desc = d.querySelector('.doc-desc').value.trim();
-    if (name || url) docs.push({name:name, url:url, desc:desc});
+    var catInfo = getCatInfo(cat);
+    if (url) docs.push({cat:cat, name:catInfo.label, icon:catInfo.icon, url:url, desc:desc});
   });
   var notes = document.getElementById('manual-notes').value.trim();
   try {
