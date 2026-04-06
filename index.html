@@ -1489,6 +1489,43 @@ function isMobile() {
   return window.innerWidth <= 768;
 }
 
+
+// ─── EQUIPMENT STATUS ────────────────────────
+// 優先順序：
+// 1. 有未完成記錄 → 依最高嚴重度自動判別（高=異常、中=注意）
+// 2. 無記錄 或 全部已完成 → 使用管理後台手動設定的狀態
+function calcEquipStatus(equipId) {
+  var eq = (window.EQUIPMENT || []).find(function(e){ return e.id === equipId; });
+  var manualStatus = eq ? (eq.manualStatus || eq.status || 'ok') : 'ok';
+
+  var recs = (window.records || []).filter(function(r) {
+    return r.equipId === equipId;
+  });
+  // Get unresolved records (no 已完成 follow-up)
+  var unresolved = recs.filter(function(r) {
+    var entries = r.followUps || [];
+    return !entries.some(function(e) { return e.status === '已完成'; });
+  });
+
+  // If there are unresolved records → auto by severity
+  if (unresolved.length > 0) {
+    if (unresolved.some(function(r) { return r.severity === '高'; })) return 'error';
+    if (unresolved.some(function(r) { return r.severity === '中'; })) return 'warn';
+    // Low severity unresolved → keep manual status (低嚴重度不影響狀態)
+    return manualStatus;
+  }
+
+  // No unresolved records → use manual status
+  return manualStatus;
+}
+
+// Apply status to all equipment
+function applyAutoStatus() {
+  (window.EQUIPMENT || []).forEach(function(e) {
+    e.status = calcEquipStatus(e.id);
+  });
+}
+
 // ─── SIDEBAR TOGGLE ──────────────────────────
 function toggleSidebar() {
   var sidebar = document.getElementById('sidebar');
@@ -1601,17 +1638,23 @@ function updateStats() {
   var now = new Date(), m = now.getMonth(), y = now.getFullYear(), td = today();
   var month = records.filter(function(r){ var d=new Date(r.date); return d.getMonth()===m && d.getFullYear()===y; });
   var todays = records.filter(function(r){ return r.date===td; });
-  var high   = records.filter(function(r){ return r.severity==='高'; });
-  document.getElementById('stat-total').textContent   = EQUIPMENT.length;
+  // Pending = unresolved records (no 已完成 follow-up)
+  var pending = records.filter(function(r) {
+    var entries = r.followUps || [];
+    return !entries.some(function(e){ return e.status==='已完成'; });
+  });
+  document.getElementById('stat-total').textContent   = (window.EQUIPMENT||EQUIPMENT).length;
   document.getElementById('stat-month').textContent   = month.length;
-  document.getElementById('stat-pending').textContent = high.length;
+  document.getElementById('stat-pending').textContent = pending.length;
   document.getElementById('stat-today').textContent   = todays.length;
 }
 function renderEquipList() {
+  // Auto-calculate status from records
+  applyAutoStatus();
   var statusOrder = {error:0, warn:1, ok:2};
   var statusLabel = {ok:'正常', warn:'注意', error:'異常'};
   var statusColor = {ok:'var(--ok)', warn:'var(--warn)', error:'var(--err)'};
-  var sorted = EQUIPMENT.slice().sort(function(a,b){ return statusOrder[a.status]-statusOrder[b.status]; });
+  var sorted = (window.EQUIPMENT||EQUIPMENT).slice().sort(function(a,b){ return statusOrder[a.status]-statusOrder[b.status]; });
   var html = '';
   sorted.forEach(function(e) {
     html += '<div class="recent-item" data-eid="' + e.id + '" onclick="openEquipDetail(this.dataset.eid)">';
@@ -1673,7 +1716,7 @@ function openEquipDetail(equipId) {
   var prefix = equipId.split('-')[0];
   var icon = MANUAL_ICONS[prefix] || '🔧';
   var statusMap = {ok:['正常運作','var(--ok)'], warn:['需要注意','var(--warn)'], error:['異常停用','var(--err)']};
-  var sInfo = statusMap[eq.status] || ['未知','var(--txt2)'];
+  var displayStatus = calcEquipStatus(eq.id); var sInfo = statusMap[displayStatus] || ['未知','var(--txt2)'];
 
   document.getElementById('ed-breadcrumb').textContent = '// ' + eq.id;
   document.getElementById('ed-title').textContent = eq.name;
@@ -1684,7 +1727,7 @@ function openEquipDetail(equipId) {
   document.getElementById('ed-dept').textContent = '📍 ' + (spec.dept || eq.dept || '');
   document.getElementById('ed-banner').style.borderLeftColor = sInfo[1];
   document.getElementById('ed-status-badge').innerHTML =
-    '<span class="status-dot ' + eq.status + '" style="width:12px;height:12px;"></span>' +
+    '<span class="status-dot ' + displayStatus + '" style="width:12px;height:12px;"></span>' +
     '<span style="color:' + sInfo[1] + ';">' + sInfo[0] + '</span>';
 
   var specItems = [
@@ -2094,10 +2137,11 @@ function saveFollowUp() {
   // If 已完成 → set equipment status to ok
   if (status === '已完成') {
     var equipId = records[idx].equipId;
-    var eq = EQUIPMENT.find(function(e){ return e.id===equipId; });
+    var eq = (window.EQUIPMENT||EQUIPMENT).find(function(e){ return e.id===equipId; });
     if (eq) {
-      eq.status = 'ok';
-      showToast('✅ 已完成！儀器「' + eq.name + '」狀態已自動更新為正常', 'success');
+      // Revert to manual status (auto-calc will handle display)
+      eq.status = eq.manualStatus || 'ok';
+      showToast('✅ 已完成！儀器「' + eq.name + '」狀態已自動更新', 'success');
     }
     renderEquipList();
     renderDashboard();
@@ -2385,6 +2429,7 @@ async function saveEquip() {
   var id   = document.getElementById('em-id').value.trim().toUpperCase();
   var name = document.getElementById('em-name').value.trim();
   if (!id||!name) { showToast('請填寫儀器編號和名稱','error'); return; }
+  var manStat = document.getElementById('em-status').value;
   var data = {
     id: id, name: name,
     dept: document.getElementById('em-dept').value.trim(),
@@ -2395,7 +2440,8 @@ async function saveEquip() {
     lastPM: document.getElementById('em-lastpm').value.trim(),
     nextPM: document.getElementById('em-nextpm').value.trim(),
     notes: document.getElementById('em-notes').value.trim(),
-    status: document.getElementById('em-status').value,
+    status: manStat,
+    manualStatus: manStat,   // stored separately so auto-calc can override display only
     sortOrder: (window.EQUIPMENT||[]).length,
   };
   try {
