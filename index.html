@@ -42,6 +42,7 @@ onAuthStateChanged(auth, function(user) {
     document.getElementById('user-email').textContent = user.email;
     window._currentUser = user;
     if (!window._appInited) { window._appInited = true; init(); }
+    if (typeof checkAdminUI === 'function') checkAdminUI();
     // Start real-time listener
     startRealtimeListener();
   } else {
@@ -52,27 +53,80 @@ onAuthStateChanged(auth, function(user) {
   }
 });
 
+import { setDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+window._fb.setDoc = setDoc;
+
+const ADMIN_EMAIL = 'Jia4289@gmail.com';
+window.isAdmin = function() {
+  return window._currentUser && window._currentUser.email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+};
+
 function startRealtimeListener() {
   var fb = window._fb;
   if (window._unsubscribe) window._unsubscribe();
+  var unsubs = [];
+
+  // Records listener
   var q = fb.query(fb.collection(fb.db, 'records'), fb.orderBy('createdAt', 'desc'));
-  window._unsubscribe = fb.onSnapshot(q, function(snapshot) {
+  unsubs.push(fb.onSnapshot(q, function(snapshot) {
     window.records = [];
     snapshot.forEach(function(d) {
       var data = d.data();
       data.id = d.id;
-      // Convert Firestore timestamp
       if (data.createdAt && data.createdAt.toDate) data.createdAt = data.createdAt.toDate().toISOString();
       window.records.push(data);
     });
     renderDashboard();
     updateBadge();
-    // Refresh query if on query page
-    if (document.getElementById('page-query').classList.contains('active')) searchRecords();
-  }, function(err) {
-    console.error('Firestore error:', err);
-    showToast('資料同步失敗：' + err.message, 'error');
-  });
+    if (document.getElementById('page-query') && document.getElementById('page-query').classList.contains('active')) searchRecords();
+  }, function(err) { showToast('記錄同步失敗：' + err.message, 'error'); }));
+
+  // Equipment listener
+  unsubs.push(fb.onSnapshot(fb.collection(fb.db, 'equipment'), function(snapshot) {
+    if (!snapshot.empty) {
+      window.EQUIPMENT = [];
+      snapshot.forEach(function(d) {
+        var data = d.data();
+        data._docId = d.id;
+        // Use custom id field if set, else use doc id
+        if (!data.id) data.id = d.id;
+        window.EQUIPMENT.push(data);
+      });
+      window.EQUIPMENT.sort(function(a,b){ return (a.sortOrder||0)-(b.sortOrder||0); });
+    }
+    renderEquipList();
+    if (typeof populateEquipSelects === 'function') populateEquipSelects();
+    if (typeof checkAdminUI === 'function') checkAdminUI();
+    if (document.getElementById('admin-tab-equip') && !document.getElementById('admin-tab-equip').style.display) renderAdminEquip();
+  }, function(err) { console.warn('Equipment listener:', err); }));
+
+  // Q&A listener
+  unsubs.push(fb.onSnapshot(fb.collection(fb.db, 'qa'), function(snapshot) {
+    if (!snapshot.empty) {
+      window.QA_DATA = [];
+      snapshot.forEach(function(d) {
+        var data = d.data(); data._docId = d.id; data.id = d.id; window.QA_DATA.push(data);
+      });
+      window.QA_DATA.sort(function(a,b){ return (a.sortOrder||0)-(b.sortOrder||0); });
+    }
+    if (document.getElementById('qa-list')) renderQA();
+    if (document.getElementById('admin-qa-list') && typeof renderAdminQA==='function') renderAdminQA();
+  }, function(err) { console.warn('QA listener:', err); }));
+
+  // Contacts listener
+  unsubs.push(fb.onSnapshot(fb.collection(fb.db, 'contacts'), function(snapshot) {
+    if (!snapshot.empty) {
+      window.CONTACTS = [];
+      snapshot.forEach(function(d) {
+        var data = d.data(); data._docId = d.id; data.id = d.id; window.CONTACTS.push(data);
+      });
+      window.CONTACTS.sort(function(a,b){ return (a.sortOrder||0)-(b.sortOrder||0); });
+    }
+    renderContacts();
+    if (document.getElementById('admin-contacts-list') && typeof renderAdminContacts==='function') renderAdminContacts();
+  }, function(err) { console.warn('Contacts listener:', err); }));
+
+  window._unsubscribe = function() { unsubs.forEach(function(u){ u(); }); };
 }
 </script>
 <style>
@@ -362,6 +416,10 @@ tbody td{padding:12px 16px;color:var(--txt);vertical-align:middle;}
       <div class="nav-label">資源</div>
       <div class="nav-item" id="nav-assistant" onclick="showPage('assistant')"><span class="icon">🤖</span>小幫手</div>
       <div class="nav-item" id="nav-qa" onclick="showPage('qa')"><span class="icon">💬</span>常見 Q&amp;A</div>
+    </div>
+    <div class="nav-section" id="admin-nav-section" style="display:none;">
+      <div class="nav-label">管理員</div>
+      <div class="nav-item" id="nav-admin" onclick="showPage('admin')"><span class="icon">⚙️</span>管理後台</div>
     </div>
   </nav>
   <div class="sidebar-footer">
@@ -653,7 +711,164 @@ tbody td{padding:12px 16px;color:var(--txt);vertical-align:middle;}
   </div>
 </div>
 
+
+<!-- ADMIN PAGE -->
+<div class="page-section" id="page-admin">
+  <div class="page-header">
+    <div class="page-title"><span>// ADMIN</span>管理後台</div>
+    <button class="btn btn-secondary" onclick="showPage('dashboard')">← 返回總覽</button>
+  </div>
+  <div class="tabs" id="admin-tabs">
+    <div class="tab active" onclick="switchAdminTab('equip',this)">🔧 儀器管理</div>
+    <div class="tab" onclick="switchAdminTab('qa',this)">💬 Q&A 管理</div>
+    <div class="tab" onclick="switchAdminTab('contacts',this)">👨‍🔧 聯絡人管理</div>
+    <div class="tab" onclick="switchAdminTab('manuals',this)">📖 使用手冊</div>
+  </div>
+
+  <!-- 儀器管理 -->
+  <div id="admin-tab-equip">
+    <div class="card">
+      <div class="card-title" style="justify-content:space-between;display:flex;align-items:center;">
+        <span style="display:flex;align-items:center;gap:6px;"><span style="display:block;width:3px;height:14px;background:var(--acc);border-radius:2px;"></span>儀器列表</span>
+        <button class="btn btn-primary btn-sm" onclick="openEquipModal()">＋ 新增儀器</button>
+      </div>
+      <div class="table-wrap">
+        <table><thead><tr><th>編號</th><th>名稱</th><th>科別</th><th>品牌</th><th>狀態</th><th>操作</th></tr></thead>
+        <tbody id="admin-equip-list"></tbody></table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Q&A 管理 -->
+  <div id="admin-tab-qa" style="display:none;">
+    <div class="card">
+      <div class="card-title" style="justify-content:space-between;display:flex;align-items:center;">
+        <span style="display:flex;align-items:center;gap:6px;"><span style="display:block;width:3px;height:14px;background:var(--acc);border-radius:2px;"></span>Q&A 列表</span>
+        <button class="btn btn-primary btn-sm" onclick="openQAModal()">＋ 新增問答</button>
+      </div>
+      <div id="admin-qa-list"></div>
+    </div>
+  </div>
+
+  <!-- 聯絡人管理 -->
+  <div id="admin-tab-contacts" style="display:none;">
+    <div class="card">
+      <div class="card-title" style="justify-content:space-between;display:flex;align-items:center;">
+        <span style="display:flex;align-items:center;gap:6px;"><span style="display:block;width:3px;height:14px;background:var(--acc);border-radius:2px;"></span>維修聯絡人</span>
+        <button class="btn btn-primary btn-sm" onclick="openContactModal()">＋ 新增聯絡人</button>
+      </div>
+      <div id="admin-contacts-list"></div>
+    </div>
+  </div>
+
+  <!-- 使用手冊管理 -->
+  <div id="admin-tab-manuals" style="display:none;">
+    <div class="card">
+      <div class="card-title" style="justify-content:space-between;display:flex;align-items:center;">
+        <span style="display:flex;align-items:center;gap:6px;"><span style="display:block;width:3px;height:14px;background:var(--acc);border-radius:2px;"></span>使用手冊管理</span>
+        <div style="font-size:12px;color:var(--txt2);">點擊儀器編輯其手冊資料</div>
+      </div>
+      <div id="admin-manuals-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;"></div>
+    </div>
+  </div>
+</div>
+
 <!-- MODALS -->
+
+<!-- EQUIP MODAL -->
+<div class="modal-overlay" id="equip-modal">
+  <div class="modal" style="max-width:560px;">
+    <div class="modal-header">
+      <div class="modal-title" id="equip-modal-title">＋ 新增儀器</div>
+      <span class="modal-close" onclick="closeModal('equip-modal')">✕</span>
+    </div>
+    <div class="form-grid">
+      <div class="form-group"><label>儀器編號 *</label><input type="text" id="em-id" placeholder="如：CT-001"></div>
+      <div class="form-group"><label>狀態</label>
+        <select id="em-status"><option value="ok">🟢 正常</option><option value="warn">🟡 注意</option><option value="error">🔴 異常</option></select>
+      </div>
+      <div class="form-group full"><label>儀器名稱 *</label><input type="text" id="em-name" placeholder="如：64切電腦斷層掃描"></div>
+      <div class="form-group"><label>所在科別</label><input type="text" id="em-dept" placeholder="如：影像科"></div>
+      <div class="form-group"><label>品牌型號</label><input type="text" id="em-brand" placeholder="如：Siemens SOMATOM"></div>
+      <div class="form-group"><label>安裝位置</label><input type="text" id="em-location" placeholder="如：B1 影像室"></div>
+      <div class="form-group"><label>序號</label><input type="text" id="em-serial" placeholder="如：SIM-CT-2019-0047"></div>
+      <div class="form-group"><label>安裝日期</label><input type="text" id="em-install" placeholder="如：2020-05"></div>
+      <div class="form-group"><label>上次保養</label><input type="text" id="em-lastpm" placeholder="如：2024-12"></div>
+      <div class="form-group"><label>下次保養</label><input type="text" id="em-nextpm" placeholder="如：2025-06"></div>
+      <div class="form-group full"><label>備註</label><textarea id="em-notes" style="min-height:70px;" placeholder="操作注意事項…"></textarea></div>
+    </div>
+    <div style="margin-top:20px;display:flex;gap:12px;">
+      <button class="btn btn-primary" onclick="saveEquip()">✓ 儲存</button>
+      <button class="btn btn-secondary" onclick="closeModal('equip-modal')">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- QA MODAL -->
+<div class="modal-overlay" id="qa-modal">
+  <div class="modal" style="max-width:520px;">
+    <div class="modal-header">
+      <div class="modal-title" id="qa-modal-title">＋ 新增 Q&A</div>
+      <span class="modal-close" onclick="closeModal('qa-modal')">✕</span>
+    </div>
+    <div class="form-grid" style="grid-template-columns:1fr;">
+      <div class="form-group"><label>類別</label>
+        <select id="qm-cat"><option>操作</option><option>故障</option><option>保養</option><option>安全</option><option>品保</option></select>
+      </div>
+      <div class="form-group"><label>問題 *</label><input type="text" id="qm-q" placeholder="輸入問題…"></div>
+      <div class="form-group"><label>答案 *</label><textarea id="qm-a" style="min-height:120px;" placeholder="輸入詳細回答…"></textarea></div>
+    </div>
+    <div style="margin-top:20px;display:flex;gap:12px;">
+      <button class="btn btn-primary" onclick="saveQA()">✓ 儲存</button>
+      <button class="btn btn-secondary" onclick="closeModal('qa-modal')">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- CONTACT MODAL -->
+<div class="modal-overlay" id="contact-modal">
+  <div class="modal" style="max-width:480px;">
+    <div class="modal-header">
+      <div class="modal-title" id="contact-modal-title">＋ 新增聯絡人</div>
+      <span class="modal-close" onclick="closeModal('contact-modal')">✕</span>
+    </div>
+    <div class="form-grid">
+      <div class="form-group"><label>姓名 *</label><input type="text" id="cm-name" placeholder="輸入姓名"></div>
+      <div class="form-group"><label>圖示</label><input type="text" id="cm-avatar" placeholder="如：👨‍🔧" maxlength="4"></div>
+      <div class="form-group full"><label>職稱 / 角色</label><input type="text" id="cm-role" placeholder="如：原廠 FSE（Siemens）"></div>
+      <div class="form-group"><label>電話</label><input type="text" id="cm-phone" placeholder="如：0912-345-678"></div>
+      <div class="form-group"><label>Email</label><input type="email" id="cm-email" placeholder="如：engineer@siemens.com"></div>
+      <div class="form-group full"><label>負責儀器</label><input type="text" id="cm-equip" placeholder="如：CT-001, MRI-001（或填「全部儀器」）"></div>
+    </div>
+    <div style="margin-top:20px;display:flex;gap:12px;">
+      <button class="btn btn-primary" onclick="saveContact()">✓ 儲存</button>
+      <button class="btn btn-secondary" onclick="closeModal('contact-modal')">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- MANUAL MODAL -->
+<div class="modal-overlay" id="manual-modal">
+  <div class="modal" style="max-width:560px;">
+    <div class="modal-header">
+      <div class="modal-title">📖 編輯使用手冊</div>
+      <span class="modal-close" onclick="closeModal('manual-modal')">✕</span>
+    </div>
+    <div id="manual-equip-info" style="background:var(--sur2);border-radius:var(--rs);padding:10px 14px;margin-bottom:16px;font-size:13px;color:var(--txt2);border:1px solid var(--bdr);"></div>
+    <div id="manual-docs-editor"></div>
+    <button class="btn btn-ghost btn-sm" style="margin-top:10px;" onclick="addManualDoc()">＋ 新增文件連結</button>
+    <div style="margin-top:16px;border-top:1px solid var(--bdr);padding-top:14px;">
+      <div class="form-group"><label>快速備註 / 注意事項</label>
+        <textarea id="manual-notes" style="min-height:80px;" placeholder="如：使用前請確認管電壓校正…"></textarea>
+      </div>
+    </div>
+    <div style="margin-top:16px;display:flex;gap:12px;">
+      <button class="btn btn-primary" onclick="saveManual()">✓ 儲存</button>
+      <button class="btn btn-secondary" onclick="closeModal('manual-modal')">取消</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="detail-modal">
   <div class="modal" style="max-width:600px;">
     <div class="modal-header"><div class="modal-title">📋 記錄詳細</div><span class="modal-close" onclick="closeModal('detail-modal')">✕</span></div>
@@ -1537,6 +1752,331 @@ function deleteFuEntry(recordId, entryIdx) {
     var entries = records[idx].followUps;
     document.getElementById('fu-timeline').innerHTML = buildFuTimeline(entries, recordId, true);
     showToast('追蹤記錄已刪除','success');
+  });
+}
+
+
+// ─── ADMIN ───────────────────────────────────
+var ADMIN_EMAIL = 'Jia4289@gmail.com';
+var editingEquipId = null;
+var editingQAId = null;
+var editingContactId = null;
+var editingManualEquipId = null;
+var manualDocCount = 0;
+
+function checkAdminUI() {
+  var isAdm = window.isAdmin && window.isAdmin();
+  var sec = document.getElementById('admin-nav-section');
+  if (sec) sec.style.display = isAdm ? '' : 'none';
+}
+
+function switchAdminTab(tab, el) {
+  ['equip','qa','contacts','manuals'].forEach(function(t) {
+    var el2 = document.getElementById('admin-tab-'+t);
+    if (el2) el2.style.display = 'none';
+  });
+  var t = document.getElementById('admin-tab-'+tab);
+  if (t) t.style.display = '';
+  document.querySelectorAll('#admin-tabs .tab').forEach(function(n){ n.classList.remove('active'); });
+  if (el) el.classList.add('active');
+  if (tab === 'equip') renderAdminEquip();
+  if (tab === 'qa') renderAdminQA();
+  if (tab === 'contacts') renderAdminContacts();
+  if (tab === 'manuals') renderAdminManuals();
+}
+
+// ── EQUIPMENT ──
+function renderAdminEquip() {
+  var eq = window.EQUIPMENT || [];
+  var statusLabel = {ok:'🟢 正常', warn:'🟡 注意', error:'🔴 異常'};
+  var html = '';
+  eq.forEach(function(e) {
+    html += '<tr>';
+    html += '<td class="td-id">' + esc(e.id) + '</td>';
+    html += '<td style="font-weight:600;">' + esc(e.name) + '</td>';
+    html += '<td style="color:var(--txt2);">' + esc(e.dept||'—') + '</td>';
+    html += '<td style="color:var(--txt2);">' + esc(e.brand||'—') + '</td>';
+    html += '<td>' + (statusLabel[e.status]||'—') + '</td>';
+    html += '<td style="white-space:nowrap;">';
+    html += '<button class="btn btn-ghost btn-sm" data-eid="' + e.id + '" onclick="openEquipModal(this.dataset.eid)">編輯</button> ';
+    html += '<button class="btn btn-danger btn-sm" data-eid="' + e.id + '" onclick="deleteEquip(this.dataset.eid)">刪除</button>';
+    html += '</td></tr>';
+  });
+  document.getElementById('admin-equip-list').innerHTML = html || '<tr><td colspan="6"><div class="empty-state" style="padding:20px;"><div>尚無儀器資料</div></div></td></tr>';
+}
+
+function openEquipModal(equipId) {
+  editingEquipId = equipId || null;
+  var eq = equipId ? (window.EQUIPMENT||[]).find(function(e){ return e.id===equipId; }) : null;
+  document.getElementById('equip-modal-title').textContent = eq ? '✏️ 編輯儀器' : '＋ 新增儀器';
+  document.getElementById('em-id').value = eq ? eq.id : '';
+  document.getElementById('em-id').readOnly = !!eq;
+  document.getElementById('em-name').value = eq ? (eq.name||'') : '';
+  document.getElementById('em-dept').value = eq ? (eq.dept||'') : '';
+  document.getElementById('em-brand').value = eq ? (eq.brand||'') : '';
+  document.getElementById('em-location').value = eq ? (eq.location||'') : '';
+  document.getElementById('em-serial').value = eq ? (eq.serial||'') : '';
+  document.getElementById('em-install').value = eq ? (eq.install||'') : '';
+  document.getElementById('em-lastpm').value = eq ? (eq.lastPM||'') : '';
+  document.getElementById('em-nextpm').value = eq ? (eq.nextPM||'') : '';
+  document.getElementById('em-notes').value = eq ? (eq.notes||'') : '';
+  document.getElementById('em-status').value = eq ? (eq.status||'ok') : 'ok';
+  document.getElementById('equip-modal').classList.add('open');
+}
+
+async function saveEquip() {
+  var fb = window._fb;
+  var id   = document.getElementById('em-id').value.trim().toUpperCase();
+  var name = document.getElementById('em-name').value.trim();
+  if (!id||!name) { showToast('請填寫儀器編號和名稱','error'); return; }
+  var data = {
+    id: id, name: name,
+    dept: document.getElementById('em-dept').value.trim(),
+    brand: document.getElementById('em-brand').value.trim(),
+    location: document.getElementById('em-location').value.trim(),
+    serial: document.getElementById('em-serial').value.trim(),
+    install: document.getElementById('em-install').value.trim(),
+    lastPM: document.getElementById('em-lastpm').value.trim(),
+    nextPM: document.getElementById('em-nextpm').value.trim(),
+    notes: document.getElementById('em-notes').value.trim(),
+    status: document.getElementById('em-status').value,
+    sortOrder: (window.EQUIPMENT||[]).length,
+  };
+  try {
+    if (editingEquipId) {
+      var eq = (window.EQUIPMENT||[]).find(function(e){ return e.id===editingEquipId; });
+      if (eq && eq._docId) {
+        await fb.updateDoc(fb.doc(fb.db,'equipment',eq._docId), data);
+      }
+    } else {
+      var docRef = await fb.addDoc(fb.collection(fb.db,'equipment'), data);
+      // Store docId in data for future edits
+    }
+    closeModal('equip-modal');
+    showToast('✓ 儀器資料已儲存','success');
+    populateEquipSelects();
+  } catch(e) { showToast('儲存失敗：'+e.message,'error'); }
+}
+
+async function deleteEquip(equipId) {
+  if (!confirm('確定刪除儀器「'+equipId+'」？此操作無法復原。')) return;
+  var fb = window._fb;
+  var eq = (window.EQUIPMENT||[]).find(function(e){ return e.id===equipId; });
+  if (eq && eq._docId) {
+    try {
+      await fb.deleteDoc(fb.doc(fb.db,'equipment',eq._docId));
+      showToast('儀器已刪除','success');
+    } catch(e) { showToast('刪除失敗：'+e.message,'error'); }
+  }
+}
+
+// ── Q&A ──
+function renderAdminQA() {
+  var data = window.QA_DATA || [];
+  var catClr = {操作:'var(--acc)',故障:'var(--err)',保養:'var(--acc4)',安全:'var(--acc3)',品保:'var(--acc2)'};
+  var html = '';
+  data.forEach(function(q) {
+    html += '<div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--rs);padding:14px 16px;margin-bottom:10px;display:flex;align-items:flex-start;gap:12px;">';
+    html += '<div style="flex:1;">';
+    html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">';
+    html += '<span style="background:'+(catClr[q.cat]||'var(--txt2)')+';color:#000;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;">'+esc(q.cat)+'</span>';
+    html += '<span style="font-weight:600;font-size:14px;">'+esc(q.q)+'</span></div>';
+    html += '<div style="font-size:13px;color:var(--txt2);line-height:1.6;">'+esc(q.a)+'</div></div>';
+    html += '<div style="display:flex;gap:6px;flex-shrink:0;">';
+    html += '<button class="btn btn-ghost btn-sm" data-qid="'+(q.id||'')+(q._docId||'')+'" onclick="openQAModal(this.dataset.qid)">編輯</button>';
+    html += '<button class="btn btn-danger btn-sm" data-qid="'+(q._docId||q.id||'')+'" onclick="deleteQA(this.dataset.qid)">刪除</button>';
+    html += '</div></div>';
+  });
+  document.getElementById('admin-qa-list').innerHTML = html || '<div class="empty-state" style="padding:30px;"><div>尚無 Q&A 資料</div></div>';
+}
+
+function openQAModal(docId) {
+  editingQAId = docId || null;
+  var qa = docId ? (window.QA_DATA||[]).find(function(q){ return q._docId===docId||q.id===docId; }) : null;
+  document.getElementById('qa-modal-title').textContent = qa ? '✏️ 編輯 Q&A' : '＋ 新增 Q&A';
+  document.getElementById('qm-cat').value = qa ? (qa.cat||'操作') : '操作';
+  document.getElementById('qm-q').value = qa ? (qa.q||'') : '';
+  document.getElementById('qm-a').value = qa ? (qa.a||'') : '';
+  document.getElementById('qa-modal').classList.add('open');
+}
+
+async function saveQA() {
+  var fb = window._fb;
+  var q = document.getElementById('qm-q').value.trim();
+  var a = document.getElementById('qm-a').value.trim();
+  if (!q||!a) { showToast('請填寫問題和答案','error'); return; }
+  var data = { cat:document.getElementById('qm-cat').value, q:q, a:a, sortOrder:(window.QA_DATA||[]).length };
+  try {
+    if (editingQAId) {
+      await fb.updateDoc(fb.doc(fb.db,'qa',editingQAId), data);
+    } else {
+      await fb.addDoc(fb.collection(fb.db,'qa'), data);
+    }
+    closeModal('qa-modal');
+    showToast('✓ Q&A 已儲存','success');
+  } catch(e) { showToast('儲存失敗：'+e.message,'error'); }
+}
+
+async function deleteQA(docId) {
+  if (!docId||!confirm('確定刪除此 Q&A？')) return;
+  var fb = window._fb;
+  try {
+    await fb.deleteDoc(fb.doc(fb.db,'qa',docId));
+    showToast('Q&A 已刪除','success');
+  } catch(e) { showToast('刪除失敗：'+e.message,'error'); }
+}
+
+// ── CONTACTS ──
+function renderAdminContacts() {
+  var data = window.CONTACTS || [];
+  var html = '';
+  data.forEach(function(c) {
+    html += '<div class="contact-card" style="flex-wrap:wrap;">';
+    html += '<div class="contact-avatar">' + (c.avatar||'👤') + '</div>';
+    html += '<div style="flex:1;min-width:160px;"><div style="font-weight:600;">'+esc(c.name)+'</div>';
+    html += '<div style="font-size:12px;color:var(--txt2);">'+esc(c.role||'')+'</div>';
+    html += '<div style="font-size:11px;color:var(--acc);">'+esc(c.equip||'')+'</div></div>';
+    html += '<div style="font-size:12px;color:var(--acc2);">'+esc(c.phone||'')+'</div>';
+    html += '<div style="display:flex;gap:6px;margin-left:8px;">';
+    html += '<button class="btn btn-ghost btn-sm" data-cid="'+(c._docId||c.id||'')+'" onclick="openContactModal(this.dataset.cid)">編輯</button>';
+    html += '<button class="btn btn-danger btn-sm" data-cid="'+(c._docId||c.id||'')+'" onclick="deleteContact(this.dataset.cid)">刪除</button>';
+    html += '</div></div>';
+  });
+  document.getElementById('admin-contacts-list').innerHTML = html || '<div class="empty-state" style="padding:30px;"><div>尚無聯絡人資料</div></div>';
+}
+
+function openContactModal(docId) {
+  editingContactId = docId || null;
+  var c = docId ? (window.CONTACTS||[]).find(function(x){ return x._docId===docId||x.id===docId; }) : null;
+  document.getElementById('contact-modal-title').textContent = c ? '✏️ 編輯聯絡人' : '＋ 新增聯絡人';
+  document.getElementById('cm-name').value = c ? (c.name||'') : '';
+  document.getElementById('cm-avatar').value = c ? (c.avatar||'👨‍🔧') : '👨‍🔧';
+  document.getElementById('cm-role').value = c ? (c.role||'') : '';
+  document.getElementById('cm-phone').value = c ? (c.phone||'') : '';
+  document.getElementById('cm-email').value = c ? (c.email||'') : '';
+  document.getElementById('cm-equip').value = c ? (c.equip||'') : '';
+  document.getElementById('contact-modal').classList.add('open');
+}
+
+async function saveContact() {
+  var fb = window._fb;
+  var name = document.getElementById('cm-name').value.trim();
+  if (!name) { showToast('請填寫姓名','error'); return; }
+  var data = {
+    name: name,
+    avatar: document.getElementById('cm-avatar').value.trim() || '👤',
+    role: document.getElementById('cm-role').value.trim(),
+    phone: document.getElementById('cm-phone').value.trim(),
+    email: document.getElementById('cm-email').value.trim(),
+    equip: document.getElementById('cm-equip').value.trim(),
+    sortOrder: (window.CONTACTS||[]).length,
+  };
+  try {
+    if (editingContactId) {
+      await fb.updateDoc(fb.doc(fb.db,'contacts',editingContactId), data);
+    } else {
+      await fb.addDoc(fb.collection(fb.db,'contacts'), data);
+    }
+    closeModal('contact-modal');
+    showToast('✓ 聯絡人已儲存','success');
+  } catch(e) { showToast('儲存失敗：'+e.message,'error'); }
+}
+
+async function deleteContact(docId) {
+  if (!docId||!confirm('確定刪除此聯絡人？')) return;
+  var fb = window._fb;
+  try {
+    await fb.deleteDoc(fb.doc(fb.db,'contacts',docId));
+    showToast('聯絡人已刪除','success');
+  } catch(e) { showToast('刪除失敗：'+e.message,'error'); }
+}
+
+// ── MANUALS ──
+function renderAdminManuals() {
+  var eq = window.EQUIPMENT || [];
+  var html = '';
+  eq.forEach(function(e) {
+    var prefix = e.id.split('-')[0];
+    var icons = {CT:'🩻',MRI:'🧲',XR:'☢️',US:'🔊',DS:'🫀',MM:'🩺',NM:'⚛️',PET:'🔬',RT:'⚡',BR:'🎯'};
+    var icon = icons[prefix] || '📋';
+    var docCount = (e.manualDocs||[]).length;
+    html += '<div class="manual-card" data-eid="'+e.id+'" onclick="openManualModal(this.dataset.eid)">';
+    html += '<div style="font-size:28px;">'+icon+'</div>';
+    html += '<div style="font-weight:700;">'+esc(e.name)+'</div>';
+    html += '<div style="font-size:12px;color:var(--txt2);">'+e.id+'</div>';
+    html += '<div style="margin-top:8px;font-size:12px;color:'+(docCount?'var(--acc)':'var(--txt2)')+'">';
+    html += docCount ? docCount+'個文件連結' : '尚未設定手冊';
+    html += '</div><div style="margin-top:8px;"><button class="btn btn-ghost btn-sm">✏️ 編輯手冊</button></div>';
+    html += '</div>';
+  });
+  document.getElementById('admin-manuals-list').innerHTML = html || '<div class="empty-state" style="padding:30px;"><div>請先新增儀器</div></div>';
+}
+
+function openManualModal(equipId) {
+  editingManualEquipId = equipId;
+  var eq = (window.EQUIPMENT||[]).find(function(e){ return e.id===equipId; });
+  if (!eq) return;
+  document.getElementById('manual-equip-info').innerHTML =
+    '<strong>'+esc(eq.name)+'</strong> <span style="color:var(--txt2);font-size:12px;">'+eq.id+'</span>';
+  document.getElementById('manual-notes').value = eq.notes || '';
+  manualDocCount = 0;
+  var editor = document.getElementById('manual-docs-editor');
+  editor.innerHTML = '';
+  (eq.manualDocs||[]).forEach(function(d) { addManualDoc(d); });
+  document.getElementById('manual-modal').classList.add('open');
+}
+
+function addManualDoc(data) {
+  var i = manualDocCount++;
+  var d = data || {name:'', url:'', desc:''};
+  var div = document.createElement('div');
+  div.style.cssText = 'background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--rs);padding:14px;margin-bottom:10px;';
+  div.innerHTML = '<div style="display:flex;gap:10px;align-items:center;margin-bottom:8px;">'
+    + '<div style="flex:1;font-size:12px;font-weight:600;color:var(--acc);">文件 '+(i+1)+'</div>'
+    + '<button class="btn btn-danger btn-sm" onclick="this.closest(&quot;[data-doc]&quot;).remove()" style="font-size:10px;">移除</button>'
+    + '</div>'
+    + '<div class="form-grid" style="gap:8px;">'
+    + '<div class="form-group"><label>文件名稱</label><input type="text" class="doc-name" value="'+esc(d.name)+'" placeholder="如：操作使用手冊"></div>'
+    + '<div class="form-group"><label>連結（PDF/Drive）</label><input type="text" class="doc-url" value="'+esc(d.url)+'" placeholder="https://..."></div>'
+    + '<div class="form-group full"><label>說明</label><input type="text" class="doc-desc" value="'+esc(d.desc||'')+'" placeholder="簡短說明…"></div>'
+    + '</div>';
+  div.setAttribute('data-doc', i);
+  document.getElementById('manual-docs-editor').appendChild(div);
+}
+
+async function saveManual() {
+  var fb = window._fb;
+  var eq = (window.EQUIPMENT||[]).find(function(e){ return e.id===editingManualEquipId; });
+  if (!eq) return;
+  var docs = [];
+  document.querySelectorAll('#manual-docs-editor [data-doc]').forEach(function(d) {
+    var name = d.querySelector('.doc-name').value.trim();
+    var url  = d.querySelector('.doc-url').value.trim();
+    var desc = d.querySelector('.doc-desc').value.trim();
+    if (name || url) docs.push({name:name, url:url, desc:desc});
+  });
+  var notes = document.getElementById('manual-notes').value.trim();
+  try {
+    var docId = eq._docId;
+    if (docId) {
+      await fb.updateDoc(fb.doc(fb.db,'equipment',docId), {manualDocs:docs, notes:notes});
+      showToast('✓ 手冊已儲存','success');
+    }
+    closeModal('manual-modal');
+  } catch(e) { showToast('儲存失敗：'+e.message,'error'); }
+}
+
+function populateEquipSelects() {
+  var eq = window.EQUIPMENT || [];
+  ['f-equip','q-equip'].forEach(function(selId) {
+    var sel = document.getElementById(selId);
+    if (!sel) return;
+    var cur = sel.value;
+    sel.innerHTML = '<option value="">' + (selId==='f-equip'?'— 選擇儀器 —':'所有儀器') + '</option>';
+    eq.forEach(function(e) {
+      sel.innerHTML += '<option value="'+e.id+'">['+e.id+'] '+esc(e.name)+'</option>';
+    });
+    sel.value = cur;
   });
 }
 
