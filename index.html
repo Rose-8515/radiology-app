@@ -10,7 +10,7 @@
 // FIREBASE CONFIG
 // ═══════════════════════════════════════════
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail, createUserWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail, createUserWithEmailAndPassword, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, onSnapshot, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import { getStorage, ref, uploadString, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
 
@@ -30,7 +30,7 @@ const stor  = getStorage(app);
 
 // Expose to global scope for non-module functions
 window._fb = { auth, db, stor, signInWithEmailAndPassword, signOut, onAuthStateChanged,
-  sendPasswordResetEmail, createUserWithEmailAndPassword,
+  sendPasswordResetEmail, createUserWithEmailAndPassword, updatePassword, EmailAuthProvider, reauthenticateWithCredential,
   collection, addDoc, getDocs, doc, updateDoc, deleteDoc, onSnapshot, query, orderBy,
   serverTimestamp, ref, uploadString, getDownloadURL, deleteObject };
 
@@ -156,12 +156,11 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 /* SIDEBAR */
 .sidebar{width:260px;background:var(--sur);border-right:1px solid var(--bdr);display:flex;flex-direction:column;position:fixed;top:0;left:0;bottom:0;z-index:100;transition:transform .3s ease;}
 .sidebar.collapsed{transform:translateX(-260px);}
-.hamburger-btn{position:fixed;top:16px;left:16px;z-index:101;background:var(--sur);border:1px solid var(--bdr);border-radius:var(--rs);width:40px;height:40px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;transition:left .3s ease,background .2s;}
+.hamburger-btn{position:fixed;top:14px;left:16px;z-index:102;background:var(--sur);border:1px solid var(--bdr);border-radius:var(--rs);width:40px;height:40px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;transition:left .3s ease,background .2s;}
 .hamburger-btn:hover{background:var(--sur2);}
 .sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:99;}
 .sidebar-overlay.show{display:block;}
-.main{margin-left:260px;flex:1;padding:32px;transition:margin-left .3s ease;}
-.main.expanded{margin-left:0;}
+.main{flex:1;padding:32px;padding-top:64px;transition:margin-left .3s ease;}
 .logo{padding:28px 24px 20px;border-bottom:1px solid var(--bdr);}
 .logo-icon{width:42px;height:42px;background:linear-gradient(135deg,var(--acc),var(--acc2));border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;margin-bottom:12px;box-shadow:0 0 20px rgba(79,195,161,.3);}
 .logo h1{font-family:'Noto Serif TC',serif;font-size:15px;font-weight:700;line-height:1.4;letter-spacing:.5px;}
@@ -377,8 +376,7 @@ tbody td{padding:12px 16px;color:var(--txt);vertical-align:middle;}
 ::-webkit-scrollbar{width:6px;}
 ::-webkit-scrollbar-track{background:var(--bg);}
 ::-webkit-scrollbar-thumb{background:var(--bdr);border-radius:3px;}
-@media(max-width:900px){.main{margin-left:0;padding:20px 16px}.stats-grid{grid-template-columns:1fr 1fr}.form-grid{grid-template-columns:1fr}.hamburger-btn{display:flex;}}
-@media(min-width:901px){.hamburger-btn{left:268px;}.sidebar.collapsed + .sidebar-overlay + .main,.main.expanded{margin-left:0;}.sidebar:not(.collapsed) ~ .main{margin-left:260px;}}
+@media(max-width:900px){.main{padding:20px 16px;padding-top:60px;}.stats-grid{grid-template-columns:1fr 1fr}.form-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -449,9 +447,10 @@ tbody td{padding:12px 16px;color:var(--txt);vertical-align:middle;}
     <span class="online-dot"></span>
     <span id="user-email" style="font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px;"></span>
   </div>
-  <div style="display:flex;gap:8px;">
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
     <span style="font-size:10px;color:var(--txt2);">已連線 Firebase</span>
-    <button onclick="doLogout()" style="margin-left:auto;background:none;border:none;color:var(--err);font-size:11px;cursor:pointer;font-family:'JetBrains Mono',monospace;">登出</button>
+    <button onclick="openChangePwModal()" style="background:none;border:none;color:var(--acc2);font-size:11px;cursor:pointer;font-family:'JetBrains Mono',monospace;padding:0;">🔑 變更密碼</button>
+    <button onclick="doLogout()" style="margin-left:auto;background:none;border:none;color:var(--err);font-size:11px;cursor:pointer;font-family:'JetBrains Mono',monospace;padding:0;">登出</button>
   </div>
 </div>
 </aside>
@@ -797,6 +796,37 @@ tbody td{padding:12px 16px;color:var(--txt);vertical-align:middle;}
 
 <!-- MODALS -->
 
+
+
+<!-- CHANGE PASSWORD MODAL -->
+<div class="modal-overlay" id="change-pw-modal">
+  <div class="modal" style="max-width:420px;">
+    <div class="modal-header">
+      <div class="modal-title">🔑 變更密碼</div>
+      <span class="modal-close" onclick="closeModal('change-pw-modal')">✕</span>
+    </div>
+    <div id="change-pw-error" style="display:none;background:rgba(248,81,73,.1);border:1px solid rgba(248,81,73,.3);border-radius:8px;padding:10px 14px;font-size:13px;color:var(--err);margin-bottom:14px;"></div>
+    <div id="change-pw-success" style="display:none;background:rgba(63,185,80,.1);border:1px solid rgba(63,185,80,.3);border-radius:8px;padding:10px 14px;font-size:13px;color:var(--ok);margin-bottom:14px;"></div>
+    <div class="form-grid" style="grid-template-columns:1fr;">
+      <div class="form-group">
+        <label>目前密碼 *</label>
+        <input type="password" id="cp-current" placeholder="輸入目前的密碼">
+      </div>
+      <div class="form-group">
+        <label>新密碼 *（至少 6 碼）</label>
+        <input type="password" id="cp-new" placeholder="輸入新密碼">
+      </div>
+      <div class="form-group">
+        <label>確認新密碼 *</label>
+        <input type="password" id="cp-confirm" placeholder="再次輸入新密碼" onkeydown="if(event.key==='Enter')doChangePw()">
+      </div>
+    </div>
+    <div style="margin-top:20px;display:flex;gap:12px;">
+      <button class="btn btn-primary" onclick="doChangePw()" id="cp-btn">✓ 確認變更</button>
+      <button class="btn btn-secondary" onclick="closeModal('change-pw-modal')">取消</button>
+    </div>
+  </div>
+</div>
 
 <!-- USER MANAGE MODAL -->
 <div class="modal-overlay" id="user-manage-modal">
@@ -1240,6 +1270,66 @@ function init() {
     document.head.appendChild(s);
   }
   initSidebar();
+}
+
+// ─── SIDEBAR TOGGLE ──────────────────────────
+function toggleSidebar() {
+  var sidebar = document.getElementById('sidebar');
+  var overlay = document.getElementById('sidebar-overlay');
+  var btn     = document.getElementById('hamburger-btn');
+  var isOpen  = !sidebar.classList.contains('collapsed');
+  if (isOpen) {
+    // Close
+    sidebar.classList.add('collapsed');
+    overlay.classList.remove('show');
+    btn.textContent = '☰';
+    document.querySelector('.main').style.marginLeft = '0';
+    btn.style.left = '16px';
+  } else {
+    // Open
+    sidebar.classList.remove('collapsed');
+    overlay.classList.add('show');
+    btn.textContent = '✕';
+    // On desktop, push main content right
+    if (window.innerWidth > 900) {
+      document.querySelector('.main').style.marginLeft = '260px';
+      btn.style.left = '268px';
+    }
+  }
+}
+
+function initSidebar() {
+  var main    = document.querySelector('.main');
+  var sidebar = document.getElementById('sidebar');
+  var btn     = document.getElementById('hamburger-btn');
+
+  if (window.innerWidth <= 900) {
+    // Mobile: start collapsed, sidebar overlays content
+    sidebar.classList.add('collapsed');
+    main.style.marginLeft = '0';
+    btn.style.left = '16px';
+    btn.textContent = '☰';
+  } else {
+    // Desktop: start open, main pushed right
+    sidebar.classList.remove('collapsed');
+    document.getElementById('sidebar-overlay').classList.remove('show');
+    main.style.marginLeft = '260px';
+    btn.style.left = '268px';
+    btn.textContent = '☰';
+  }
+
+  window.addEventListener('resize', function() {
+    var isCollapsed = sidebar.classList.contains('collapsed');
+    if (window.innerWidth <= 900) {
+      btn.style.left = '16px';
+      main.style.marginLeft = '0';
+    } else {
+      btn.style.left = isCollapsed ? '16px' : '268px';
+      main.style.marginLeft = isCollapsed ? '0' : '260px';
+      // Hide overlay on desktop
+      if (!isCollapsed) document.getElementById('sidebar-overlay').classList.remove('show');
+    }
+  });
 }
 
 // ─── AUTH FUNCTIONS ───────────────────────────
@@ -1864,6 +1954,75 @@ async function seedFirebaseDefaults() {
     }
   } catch(e) {
     console.warn('Seed error:', e);
+  }
+}
+
+
+// ─── CHANGE PASSWORD ─────────────────────────
+function openChangePwModal() {
+  document.getElementById('cp-current').value = '';
+  document.getElementById('cp-new').value = '';
+  document.getElementById('cp-confirm').value = '';
+  document.getElementById('change-pw-error').style.display = 'none';
+  document.getElementById('change-pw-success').style.display = 'none';
+  document.getElementById('cp-btn').disabled = false;
+  document.getElementById('change-pw-modal').classList.add('open');
+}
+
+async function doChangePw() {
+  var fb       = window._fb;
+  var current  = document.getElementById('cp-current').value;
+  var newPw    = document.getElementById('cp-new').value;
+  var confirm  = document.getElementById('cp-confirm').value;
+  var errEl    = document.getElementById('change-pw-error');
+  var okEl     = document.getElementById('change-pw-success');
+  var btn      = document.getElementById('cp-btn');
+
+  errEl.style.display = 'none';
+  okEl.style.display  = 'none';
+
+  if (!current || !newPw || !confirm) {
+    errEl.textContent = '請填寫所有欄位'; errEl.style.display = ''; return;
+  }
+  if (newPw.length < 6) {
+    errEl.textContent = '新密碼至少需要 6 個字元'; errEl.style.display = ''; return;
+  }
+  if (newPw !== confirm) {
+    errEl.textContent = '新密碼與確認密碼不一致'; errEl.style.display = ''; return;
+  }
+  if (newPw === current) {
+    errEl.textContent = '新密碼不能與目前密碼相同'; errEl.style.display = ''; return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = '處理中…';
+
+  try {
+    var user       = fb.auth.currentUser;
+    var credential = fb.EmailAuthProvider.credential(user.email, current);
+    // Re-authenticate first
+    await fb.reauthenticateWithCredential(user, credential);
+    // Then update password
+    await fb.updatePassword(user, newPw);
+    okEl.textContent = '✓ 密碼已成功變更！';
+    okEl.style.display = '';
+    btn.textContent = '✓ 已完成';
+    document.getElementById('cp-current').value = '';
+    document.getElementById('cp-new').value = '';
+    document.getElementById('cp-confirm').value = '';
+    setTimeout(function() { closeModal('change-pw-modal'); btn.textContent = '✓ 確認變更'; btn.disabled = false; }, 1500);
+  } catch(e) {
+    btn.disabled = false;
+    btn.textContent = '✓ 確認變更';
+    var msg = e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential'
+      ? '目前密碼錯誤，請重新輸入'
+      : e.code === 'auth/too-many-requests'
+      ? '嘗試次數過多，請稍後再試'
+      : e.code === 'auth/weak-password'
+      ? '新密碼強度不足，請使用更複雜的密碼'
+      : e.message;
+    errEl.textContent = msg;
+    errEl.style.display = '';
   }
 }
 
