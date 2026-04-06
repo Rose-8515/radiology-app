@@ -2,7 +2,11 @@
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0d1117">
 <title>關於儀器的兩三事</title>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;700&family=Noto+Sans+TC:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script type="module">
@@ -376,7 +380,115 @@ tbody td{padding:12px 16px;color:var(--txt);vertical-align:middle;}
 ::-webkit-scrollbar{width:6px;}
 ::-webkit-scrollbar-track{background:var(--bg);}
 ::-webkit-scrollbar-thumb{background:var(--bdr);border-radius:3px;}
-@media(max-width:900px){.main{padding:20px 16px;padding-top:60px;}.stats-grid{grid-template-columns:1fr 1fr}.form-grid{grid-template-columns:1fr}}
+
+
+/* ── MOBILE BOTTOM NAV ── */
+#mobile-bottom-nav{display:none;}
+@media(max-width:768px){
+  #mobile-bottom-nav{display:flex !important;}
+  .main{padding-bottom:calc(72px + env(safe-area-inset-bottom));}
+  /* Hide sidebar hamburger on mobile (use bottom nav instead) */
+  .hamburger-btn{display:none !important;}
+  /* Sidebar only shows as overlay when opened via toggle */
+  .sidebar{transform:translateX(-260px);}
+  .sidebar.open{transform:translateX(0);}
+}
+.mob-nav-item:active{background:var(--sur2);border-radius:8px;}
+
+/* ══ MOBILE RESPONSIVE ══════════════════════ */
+@media(max-width:768px){
+
+  /* Layout */
+  .main{padding:16px 14px;padding-top:62px;}
+  .card{padding:16px;}
+
+  /* Stats: 2x2 grid */
+  .stats-grid{grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;}
+  .stat-value{font-size:26px;}
+  .stat-icon{font-size:20px;}
+
+  /* Dashboard two columns → one column */
+  #page-dashboard > div[style*="grid-template-columns:1fr 1fr"]{
+    grid-template-columns:1fr !important;
+  }
+
+  /* Page headers: stack vertically */
+  .page-header{flex-direction:column;align-items:flex-start;gap:10px;margin-bottom:18px;}
+  .page-title{font-size:20px;}
+
+  /* Forms: single column */
+  .form-grid{grid-template-columns:1fr !important;}
+  .form-group.full{grid-column:1;}
+
+  /* Buttons: full width on forms */
+  .btn{padding:10px 16px;font-size:13px;}
+
+  /* Tables: horizontal scroll with sticky first col */
+  .table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  table{font-size:12px;min-width:500px;}
+  thead th{padding:9px 10px;font-size:10px;}
+  tbody td{padding:9px 10px;}
+
+  /* Filter bar: wrap and full width inputs */
+  .filter-bar{gap:8px;}
+  .filter-bar input,.filter-bar select{font-size:13px;max-width:none !important;flex:1;}
+
+  /* Tabs: smaller, scrollable */
+  .tabs{overflow-x:auto;white-space:nowrap;-webkit-overflow-scrolling:touch;flex-wrap:nowrap;}
+  .tab{padding:8px 14px;font-size:13px;flex-shrink:0;}
+
+  /* Modals: full screen on mobile */
+  .modal-overlay{padding:0;align-items:flex-end;}
+  .modal{border-radius:16px 16px 0 0;max-height:92vh;padding:20px 16px;max-width:100% !important;width:100%;}
+  .modal-header{margin-bottom:16px;}
+  .modal-title{font-size:17px;}
+
+  /* Camera modal: full screen */
+  #camera-modal .modal{border-radius:0;max-height:100vh;height:100%;display:flex;flex-direction:column;}
+
+  /* Severity radio labels */
+  .sev-label{padding:8px 10px;font-size:12px;}
+
+  /* Recent list items */
+  .recent-item{padding:10px 12px;}
+  .recent-meta{font-size:10px;}
+
+  /* Contact cards */
+  .contact-card{flex-wrap:wrap;gap:10px;}
+
+  /* Q&A */
+  .qa-q{padding:12px 14px;font-size:14px;}
+  .qa-a{padding:0 14px 12px;font-size:13px;}
+
+  /* Equip detail banner */
+  #ed-banner{flex-direction:column;align-items:flex-start;gap:12px;padding:16px;}
+  #ed-stats{grid-template-columns:1fr 1fr !important;}
+  #ed-specs{grid-template-columns:1fr 1fr !important;}
+
+  /* Camera buttons */
+  #page-record .btn[style*="min-width:130px"]{min-width:0 !important;font-size:12px !important;padding:8px 10px !important;}
+
+  /* Sidebar footer: compact */
+  .sidebar-footer{padding:12px;}
+
+  /* Media preview grid */
+  .media-grid{grid-template-columns:repeat(3,1fr) !important;}
+
+  /* Admin equip table */
+  #admin-equip-list td:nth-child(3),
+  #admin-equip-list td:nth-child(4){display:none;}
+  #admin-equip-list th:nth-child(3),
+  #admin-equip-list th:nth-child(4){display:none;}
+
+  /* Bottom safe area for iOS */
+  .modal{padding-bottom:calc(16px + env(safe-area-inset-bottom));}
+}
+
+/* Notch / safe area */
+@supports(padding:max(0px)){
+  .main{padding-top:max(62px, calc(env(safe-area-inset-top) + 56px));}
+  .hamburger-btn{top:max(14px, env(safe-area-inset-top));}
+}
 </style>
 </head>
 <body>
@@ -1022,6 +1134,31 @@ tbody td{padding:12px 16px;color:var(--txt);vertical-align:middle;}
   <span class="lightbox-nav next" onclick="lbNav(1,event)">›</span>
 </div>
 
+
+<!-- MOBILE BOTTOM NAV -->
+<nav id="mobile-bottom-nav" style="display:none;position:fixed;bottom:0;left:0;right:0;background:var(--sur);border-top:1px solid var(--bdr);z-index:98;padding:6px 0 calc(6px + env(safe-area-inset-bottom));display:flex;">
+  <div class="mob-nav-item active" id="mbn-dashboard" onclick="showPage('dashboard');setMobNav('dashboard')" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px;cursor:pointer;color:var(--acc);">
+    <span style="font-size:20px;">📊</span>
+    <span style="font-size:10px;">總覽</span>
+  </div>
+  <div class="mob-nav-item" id="mbn-record" onclick="showPage('record');setMobNav('record')" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px;cursor:pointer;color:var(--txt2);">
+    <span style="font-size:20px;">📝</span>
+    <span style="font-size:10px;">記錄</span>
+  </div>
+  <div class="mob-nav-item" id="mbn-query" onclick="showPage('query');setMobNav('query')" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px;cursor:pointer;color:var(--txt2);">
+    <span style="font-size:20px;">🔍</span>
+    <span style="font-size:10px;">查詢</span>
+  </div>
+  <div class="mob-nav-item" id="mbn-assistant" onclick="showPage('assistant');setMobNav('assistant')" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px;cursor:pointer;color:var(--txt2);">
+    <span style="font-size:20px;">🤖</span>
+    <span style="font-size:10px;">小幫手</span>
+  </div>
+  <div class="mob-nav-item" id="mbn-qa" onclick="showPage('qa');setMobNav('qa')" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px;cursor:pointer;color:var(--txt2);">
+    <span style="font-size:20px;">💬</span>
+    <span style="font-size:10px;">Q&A</span>
+  </div>
+</nav>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -1172,6 +1309,16 @@ function showPage(id) {
   if (id === 'query') searchRecords();
   if (id === 'dashboard') renderDashboard();
   if (id === 'record') autoFillUser();
+  // Sync bottom nav
+  setMobNav(id);
+  // Auto-close sidebar on mobile after navigation
+  if (isMobile()) {
+    var sb = document.getElementById('sidebar');
+    if (sb && !sb.classList.contains('collapsed')) {
+      sb.classList.add('collapsed');
+      document.getElementById('sidebar-overlay').classList.remove('show');
+    }
+  }
 }
 
 function autoFillUser() {
@@ -1272,6 +1419,20 @@ function init() {
   initSidebar();
 }
 
+
+// ─── MOBILE BOTTOM NAV ───────────────────────
+function setMobNav(id) {
+  document.querySelectorAll('.mob-nav-item').forEach(function(el) {
+    el.style.color = 'var(--txt2)';
+  });
+  var active = document.getElementById('mbn-' + id);
+  if (active) active.style.color = 'var(--acc)';
+}
+
+function isMobile() {
+  return window.innerWidth <= 768;
+}
+
 // ─── SIDEBAR TOGGLE ──────────────────────────
 function toggleSidebar() {
   var sidebar = document.getElementById('sidebar');
@@ -1303,12 +1464,15 @@ function initSidebar() {
   var sidebar = document.getElementById('sidebar');
   var btn     = document.getElementById('hamburger-btn');
 
-  if (window.innerWidth <= 900) {
-    // Mobile: start collapsed, sidebar overlays content
+  if (window.innerWidth <= 768) {
+    // Mobile: use bottom nav, hide hamburger, collapse sidebar
     sidebar.classList.add('collapsed');
     main.style.marginLeft = '0';
-    btn.style.left = '16px';
-    btn.textContent = '☰';
+    if (btn) { btn.style.left = '16px'; btn.textContent = '☰'; }
+  } else if (window.innerWidth <= 900) {
+    sidebar.classList.add('collapsed');
+    main.style.marginLeft = '0';
+    if (btn) { btn.style.left = '16px'; btn.textContent = '☰'; }
   } else {
     // Desktop: start open, main pushed right
     sidebar.classList.remove('collapsed');
